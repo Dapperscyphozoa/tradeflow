@@ -63,7 +63,7 @@
 <p class="lede">A native Mac app for Australian trades: quotes, jobs and tax invoices, with GST calculated the way the ATO expects it. No browser tab, no monthly login, no data on someone else's server.</p>
 <div class="cta">
   <a class="btn" href="#beta">Get the free beta</a>
-  <a class="btn ghost" href="#what">What it does</a>
+  <a class="btn ghost" href="#buy">Buy a founding licence</a>
 </div>
 <p class="fine"><span class="pill">Beta</span> &nbsp;Free for 90 days, in exchange for telling us what's broken. macOS 13 or later, Apple silicon.</p>
 
@@ -136,6 +136,30 @@
   <p class="fine">Apple silicon Macs (M1 and later), macOS 13 Ventura or newer. An Intel build is on the list if beta users need one — say so in the feedback box.</p>
 </section>
 
+<section id="buy">
+  <h2>Or just buy it</h2>
+  <p class="sub">Some people don't want a trial, they want the thing. Founding prices, while the beta is on. One business, every Mac you own, no per-seat charge, no subscription creeping up. Paid by bank transfer — we never see a card and never hold your money.</p>
+  <div class="grid" id="plans"></div>
+  <div class="card" id="buybox" hidden style="margin-top:16px">
+    <form id="bf">
+      <div class="row">
+        <div><label for="bn">Business name</label><input id="bn" required placeholder="As it appears on your invoices"></div>
+        <div><label for="be">Email</label><input id="be" type="email" required placeholder="you@business.com.au"></div>
+      </div>
+      <label for="ba">ABN (optional — goes on your receipt)</label><input id="ba" placeholder="12 345 678 901">
+      <div class="cta"><button class="btn" type="submit" id="bb">Get payment details</button>
+        <button class="btn ghost" type="button" id="bx">Cancel</button>
+        <span class="fine" id="bmsg"></span></div>
+    </form>
+    <div id="payout" hidden>
+      <p class="ok" style="font-weight:650;margin:4px 0 8px">Transfer this, and the key is emailed the moment it lands:</p>
+      <table id="paytbl"></table>
+      <p class="fine" id="paynote" style="margin-top:10px"></p>
+      <p class="fine">Keep your reference — <code id="payref"></code> — you can check it any time at this page.</p>
+    </div>
+  </div>
+</section>
+
 <section>
   <h2>What happens after the beta</h2>
   <p class="sub">Beta keys run 90 days. When the beta ends, everyone who used it and sent feedback gets it at <strong>half price</strong> for the first year — you did the work of finding the bugs. Pricing is set once we know it's worth paying for; nothing is charged automatically, and nobody's card is on file, because we never asked for one.</p>
@@ -189,6 +213,51 @@ $("f").addEventListener("submit", async e => {
     msg.textContent = "Couldn't reach the licence desk. Try again in a minute.";
     msg.className = "fine err"; btn.disabled = false;
   }
+});
+
+// ── buying ───────────────────────────────────────────────────────────────────
+let chosen = null;
+(async () => {
+  try {
+    const r = await fetch(API + "/api/plans");
+    const j = await r.json();
+    const g = $("plans");
+    g.innerHTML = j.plans.map(p => `
+      <div class="card">
+        <h3>${p.name}</h3>
+        <p style="font-size:26px;font-weight:700;color:var(--ink);margin:6px 0 2px">A$${p.aud}<span style="font-size:13px;font-weight:400;color:var(--ink2)"> ex GST</span></p>
+        <p>${p.blurb}</p>
+        <button class="btn" style="margin-top:12px;width:100%" data-plan="${p.key}">Choose</button>
+      </div>`).join("");
+    if (!j.open_for_payment) {
+      g.insertAdjacentHTML("afterend",
+        `<p class="fine" style="margin-top:12px">Founding licences aren't open for payment yet — the free beta is. Beta users get first refusal at half price.</p>`);
+      g.querySelectorAll("button").forEach(b => { b.disabled = true; b.style.opacity = .5; });
+      return;
+    }
+    g.querySelectorAll("button").forEach(b => b.onclick = () => {
+      chosen = b.dataset.plan; $("buybox").hidden = false; $("payout").hidden = true; $("bf").hidden = false;
+      $("bmsg").textContent = j.plans.find(p => p.key === chosen).name;
+      $("buybox").scrollIntoView({behavior: "smooth", block: "center"});
+    });
+  } catch (e) { /* the page still works without the buy path */ }
+})();
+
+$("bx") && ($("bx").onclick = () => { $("buybox").hidden = true; });
+
+$("bf") && $("bf").addEventListener("submit", async e => {
+  e.preventDefault();
+  const m = $("bmsg"); m.textContent = "Getting your reference…"; m.className = "fine";
+  try {
+    const r = await fetch(API + "/api/buy", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({plan: chosen, business: $("bn").value, email: $("be").value, abn: $("ba").value})});
+    const j = await r.json();
+    if (!j.ok || !j.payment) { m.textContent = j.message || j.error || "Couldn't start that order."; m.className = "fine err"; return; }
+    $("bf").hidden = true; $("payout").hidden = false; m.textContent = "";
+    $("paytbl").innerHTML = j.payment.lines.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join("");
+    $("paynote").textContent = j.payment.note;
+    $("payref").textContent = j.ref;
+  } catch (err) { m.textContent = "Couldn't reach us just now — try again in a minute."; m.className = "fine err"; }
 });
 
 $("fb").addEventListener("submit", async e => {
