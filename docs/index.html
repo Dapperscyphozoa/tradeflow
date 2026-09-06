@@ -138,7 +138,8 @@
 
 <section id="buy">
   <h2>Or just buy it</h2>
-  <p class="sub">Some people don't want a trial, they want the thing. Founding prices, while the beta is on. One business, every Mac you own, no per-seat charge, no subscription creeping up. Paid by bank transfer — we never see a card and never hold your money.</p>
+  <p class="sub">Some people don't want a trial, they want the thing. Founding prices while the beta is on: one business, every Mac you own, no per-seat charge, nothing that renews behind your back.</p>
+  <p class="sub">Payment is <strong>USDC on Base</strong> — a stablecoin, one US dollar each. There is no card form because there is no card processor: you send the exact amount from any wallet or exchange, and the licence key appears on your order page about a minute later, issued automatically. Nobody sees your card, because we never ask for one.</p>
   <div class="grid" id="plans"></div>
   <div class="card" id="buybox" hidden style="margin-top:16px">
     <form id="bf">
@@ -152,10 +153,19 @@
         <span class="fine" id="bmsg"></span></div>
     </form>
     <div id="payout" hidden>
-      <p class="ok" style="font-weight:650;margin:4px 0 8px">Transfer this, and the key is emailed the moment it lands:</p>
+      <p class="ok" style="font-weight:650;margin:4px 0 8px">Send exactly this. The key appears below by itself.</p>
       <table id="paytbl"></table>
-      <p class="fine" id="paynote" style="margin-top:10px"></p>
-      <p class="fine">Keep your reference — <code id="payref"></code> — you can check it any time at this page.</p>
+      <div class="cta"><button class="btn ghost" type="button" id="cpaddr">Copy address</button>
+        <button class="btn ghost" type="button" id="cpamt">Copy amount</button></div>
+      <p class="fine" id="paynote" style="margin-top:4px"></p>
+      <p class="fine">Your reference is <code id="payref"></code> — bookmark this page, it turns into your key.</p>
+      <div id="waiting" class="fine" style="margin-top:10px">⏳ Watching the chain for your payment…</div>
+      <div id="gotkey" hidden>
+        <p class="ok" style="font-weight:650;margin:10px 0 2px">Paid. Here is your licence key:</p>
+        <div class="key" id="paidkey"></div>
+        <div class="cta"><a class="btn" id="paiddl" href="#">Download TradeFlow</a>
+          <button class="btn ghost" type="button" id="cpkey">Copy key</button></div>
+      </div>
     </div>
   </div>
 </section>
@@ -225,7 +235,7 @@ let chosen = null;
     g.innerHTML = j.plans.map(p => `
       <div class="card">
         <h3>${p.name}</h3>
-        <p style="font-size:26px;font-weight:700;color:var(--ink);margin:6px 0 2px">A$${p.aud}<span style="font-size:13px;font-weight:400;color:var(--ink2)"> ex GST</span></p>
+        <p style="font-size:26px;font-weight:700;color:var(--ink);margin:6px 0 2px">${p.usdc} <span style="font-size:13px;font-weight:400;color:var(--ink2)">USDC</span></p>
         <p>${p.blurb}</p>
         <button class="btn" style="margin-top:12px;width:100%" data-plan="${p.key}">Choose</button>
       </div>`).join("");
@@ -254,11 +264,47 @@ $("bf") && $("bf").addEventListener("submit", async e => {
     const j = await r.json();
     if (!j.ok || !j.payment) { m.textContent = j.message || j.error || "Couldn't start that order."; m.className = "fine err"; return; }
     $("bf").hidden = true; $("payout").hidden = false; m.textContent = "";
-    $("paytbl").innerHTML = j.payment.lines.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join("");
+    $("paytbl").innerHTML = j.payment.lines.map(([k, v]) =>
+      `<tr><td>${k}</td><td style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px;word-break:break-all">${v}</td></tr>`).join("");
     $("paynote").textContent = j.payment.note;
     $("payref").textContent = j.ref;
+    $("cpaddr").onclick = () => { navigator.clipboard.writeText(j.payment.address || ""); $("cpaddr").textContent = "Copied"; };
+    $("cpamt").onclick  = () => { navigator.clipboard.writeText(j.payment.amount || ""); $("cpamt").textContent = "Copied"; };
+    watchOrder(j.ref);
   } catch (err) { m.textContent = "Couldn't reach us just now — try again in a minute."; m.className = "fine err"; }
 });
+
+// The order page turns into the licence key on its own — no email to wait for, nobody to approve.
+function watchOrder(ref) {
+  localStorage.setItem("tf_ref", ref);
+  const tick = async () => {
+    try {
+      const r = await fetch(API + "/api/order/" + ref, {cache: "no-store"});
+      const j = await r.json();
+      if (j.status === "paid" && j.licence) {
+        $("waiting").hidden = true; $("gotkey").hidden = false;
+        $("paidkey").textContent = j.licence;
+        $("paiddl").href = j.download;
+        $("cpkey").onclick = () => { navigator.clipboard.writeText(j.licence); $("cpkey").textContent = "Copied"; };
+        return true;
+      }
+    } catch (e) {}
+    return false;
+  };
+  const id = setInterval(async () => { if (await tick()) clearInterval(id); }, 15000);
+  tick();
+}
+
+// Coming back later? The last reference is remembered on this device.
+(() => {
+  const ref = localStorage.getItem("tf_ref");
+  if (!ref) return;
+  fetch(API + "/api/order/" + ref).then(r => r.json()).then(j => {
+    if (j.status !== "paid") return;
+    $("buybox").hidden = false; $("bf").hidden = true; $("payout").hidden = false;
+    $("payref").textContent = ref; watchOrder(ref);
+  }).catch(() => {});
+})();
 
 $("fb").addEventListener("submit", async e => {
   e.preventDefault();
